@@ -1,0 +1,285 @@
+{
+	"name": "PL_Weather_Ingestion",
+	"properties": {
+		"activities": [
+			{
+				"name": "GetCapitalCities",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SnowflakeV2Source",
+						"query": "SELECT CAPITAL_CITY FROM RAW.CAPITAL_CITIES",
+						"exportSettings": {
+							"type": "SnowflakeExportCopyCommand"
+						},
+						"treatDecimalAsString": false
+					},
+					"dataset": {
+						"referenceName": "SnowflakeTable",
+						"type": "DatasetReference"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "TruncateWeatherTable",
+				"type": "Script",
+				"dependsOn": [
+					{
+						"activity": "GetCapitalCities",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "weekendproject",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "NonQuery",
+							"text": "TRUNCATE TABLE RAW.WEATHER"
+						}
+					],
+					"scriptBlockExecutionTimeout": "02:00:00",
+					"treatDecimalAsString": false
+				}
+			},
+			{
+				"name": "ForEachCity",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "TruncateWeatherTable",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('GetCapitalCities').output.value",
+						"type": "Expression"
+					},
+					"batchCount": 10,
+					"activities": [
+						{
+							"name": "GetWeatherJSON",
+							"type": "WebActivity",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "GET",
+								"headers": {
+									"User-Agent": "AzureDataFactory"
+								},
+								"url": {
+									"value": "@concat('https://wttr.in/', replace(item().CAPITAL_CITY, ' ', '+'), '?format=j1')",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "InsertToSnowflake",
+							"type": "Script",
+							"dependsOn": [
+								{
+									"activity": "GetWeatherJSON",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"linkedServiceName": {
+								"referenceName": "weekendproject",
+								"type": "LinkedServiceReference"
+							},
+							"typeProperties": {
+								"scripts": [
+									{
+										"parameters": [
+											{
+												"name": "current_condition",
+												"type": "String",
+												"value": {
+													"value": "@string(activity('GetWeatherJSON').output.current_condition)",
+													"type": "Expression"
+												},
+												"direction": "Input"
+											},
+											{
+												"name": "nearest_area",
+												"type": "String",
+												"value": {
+													"value": "@string(activity('GetWeatherJSON').output.nearest_area)",
+													"type": "Expression"
+												},
+												"direction": "Input"
+											},
+											{
+												"name": "output.request",
+												"type": "String",
+												"value": {
+													"value": "@string(activity('GetWeatherJSON').output.request)",
+													"type": "Expression"
+												},
+												"direction": "Input"
+											},
+											{
+												"name": "output.weather",
+												"type": "String",
+												"value": {
+													"value": "@string(activity('GetWeatherJSON').output.weather)",
+													"type": "Expression"
+												},
+												"direction": "Input"
+											}
+										],
+										"type": "Query",
+										"text": "INSERT INTO RAW.WEATHER (current_condition, nearest_area, request, weather) SELECT PARSE_JSON(?), PARSE_JSON(?), PARSE_JSON(?), PARSE_JSON(?);"
+									}
+								],
+								"scriptBlockExecutionTimeout": "02:00:00",
+								"treatDecimalAsString": false
+							}
+						},
+						{
+							"name": "ArchiveToBlob",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "InsertToSnowflake",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "RestSource",
+									"httpRequestTimeout": "00:01:40",
+									"requestInterval": "00.00:00:00.010",
+									"requestMethod": "GET",
+									"paginationRules": {
+										"supportRFC5988": "true"
+									}
+								},
+								"sink": {
+									"type": "JsonSink",
+									"storeSettings": {
+										"type": "AzureBlobStorageWriteSettings"
+									},
+									"formatSettings": {
+										"type": "JsonWriteSettings"
+									}
+								},
+								"enableStaging": false
+							},
+							"inputs": [
+								{
+									"referenceName": "DS_WttrIn_Weather",
+									"type": "DatasetReference",
+									"parameters": {
+										"city": "@replace(item().CAPITAL_CITY, ' ', '+')"
+									}
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "DS_Blob_WeatherJson",
+									"type": "DatasetReference",
+									"parameters": {
+										"fileName": {
+											"value": "@concat(item().CAPITAL_CITY, '/', formatDateTime(utcNow(), 'yyyy-MM-dd HH:mm:ss'), '.json')",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						}
+					]
+				}
+			},
+			{
+				"name": "CallTransformProcedure",
+				"type": "Script",
+				"dependsOn": [
+					{
+						"activity": "ForEachCity",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "weekendproject",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "NonQuery",
+							"text": "CALL RAW.TRANSFORM_WEATHER()"
+						}
+					],
+					"scriptBlockExecutionTimeout": "02:00:00",
+					"treatDecimalAsString": false
+				}
+			}
+		],
+		"annotations": [],
+		"lastPublishTime": "2026-08-28T07:48:44Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

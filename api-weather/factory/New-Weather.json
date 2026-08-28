@@ -1,0 +1,15 @@
+{
+	"name": "New-Weather",
+	"properties": {
+		"trustModeClaimForMi": {
+			"value": "Disabled",
+			"editable": true
+		}
+	},
+	"location": "eastus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "18f79d51-4433-4a53-8da1-994185e49bcd",
+		"tenantId": "c5548dc2-ffee-48ff-9f92-4367368a0d7f"
+	}
+}

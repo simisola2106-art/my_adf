@@ -1,0 +1,17 @@
+{
+	"name": "SnowflakeTableraw",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "weekendproject",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "SnowflakeV2Table",
+		"schema": [],
+		"typeProperties": {
+			"schema": "RAW",
+			"table": "WEATHER_TEST"
+		}
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}
